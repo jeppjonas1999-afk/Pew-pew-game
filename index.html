@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Sandbox Assault Shooter - Keyboard Only</title>
+<title>Sandbox Assault Shooter - Pro Edition</title>
 <style>
     body { margin: 0; background: #111; color: white; font-family: Arial, sans-serif; text-align: center; overflow: hidden; }
     #ui { padding: 10px; background: #222; display: flex; justify-content: space-around; }
@@ -16,8 +16,8 @@
         gap: 10px;
     }
     .slot {
-        width: 60px;
-        height: 60px;
+        width: 70px;
+        height: 70px;
         background: #333;
         border: 2px solid #555;
         display: flex;
@@ -27,10 +27,12 @@
         font-size: 10px;
         color: #777;
     }
-    .slot.active {
-        border-color: #ff00ff; /* Rosa/Lilla kant for aktive våpen */
-        color: white;
-        background: #444;
+    .slot.owned { border-color: #888; color: #ccc; }
+    .slot.selected { 
+        border-color: #fff !important; 
+        box-shadow: 0 0 15px rgba(255,255,255,0.5);
+        color: white !important;
+        background: #555;
     }
 
     #shop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 10; }
@@ -43,19 +45,20 @@
     <div>Health: <span id="health">100</span></div>
     <div>Score: <span id="score">0</span></div>
     <div>Wave: <span id="wave">1</span></div>
+    <div>Active: <b id="current-weapon-text">Pistol</b></div>
 </div>
 
 <div id="inventory">
-    <div id="slot-pistol" class="slot active"><span>PISTOL</span></div>
-    <div id="slot-smg" class="slot"><span>SMG</span></div>
-    <div id="slot-shotgun" class="slot"><span>SHOTGUN</span></div>
+    <div id="slot-0" class="slot owned selected"><span>PISTOL</span></div>
+    <div id="slot-1" class="slot"><span>SMG</span></div>
+    <div id="slot-2" class="slot"><span>SHOTGUN</span></div>
 </div>
 
 <div id="shop">
     <h1>SHOP</h1>
     <p>Points: <span id="shopScore">0</span></p>
-    <button class="shop-btn" onclick="buyWeapon('SMG')">Buy SMG (300)</button>
-    <button class="shop-btn" onclick="buyWeapon('Shotgun')">Buy Shotgun (450)</button>
+    <button class="shop-btn" onclick="buyWeapon(1)">Buy SMG (300)</button>
+    <button class="shop-btn" onclick="buyWeapon(2)">Buy Shotgun (450)</button>
     <button class="shop-btn" onclick="closeShop()">Continue</button>
 </div>
 
@@ -65,77 +68,112 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+// Spill-stats
 let health = 100;
 let score = 0;
 let wave = 1;
 let shopOpen = false;
-let ownedWeapons = { pistol: true, smg: false, shotgun: false };
+
+// Våpen-system
+let selectedWeaponIndex = 0;
+const weaponNames = ["Pistol", "SMG", "Shotgun"];
+const ownedWeapons = [true, false, false]; // Pistol er eid fra start
+let lastShotTime = 0;
 
 const player = { x: 400, y: 250, size: 20, speed: 4 };
 const bullets = [];
 const enemies = [];
 const keys = {};
 
-// Siste kjente skytevinkel (hvis ingen fiender finnes, skyt oppover som default)
-let lastAngle = -Math.PI / 2;
-
 window.addEventListener("keydown", e => {
     keys[e.key.toLowerCase()] = true;
+    keys[e.code] = true;
+
+    // Våpenvalg med piltaster
+    if (e.code === "ArrowRight") switchWeapon(1);
+    if (e.code === "ArrowLeft") switchWeapon(-1);
+    
+    // Skyting
     if (e.key.toLowerCase() === 'e') shoot();
 });
-window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+window.addEventListener("keyup", e => {
+    keys[e.key.toLowerCase()] = false;
+    keys[e.code] = false;
+});
+
+function switchWeapon(dir) {
+    let next = selectedWeaponIndex + dir;
+    if (next >= 0 && next < 3 && ownedWeapons[next]) {
+        selectedWeaponIndex = next;
+        updateUI();
+    }
+}
 
 function shoot() {
     if (shopOpen || health <= 0) return;
-
-    let targetAngle = lastAngle;
-
-    // Finn nærmeste fiende
+    const now = Date.now();
+    
+    // Finn nærmeste fiende for auto-aim
+    let targetAngle = -Math.PI/2;
     if (enemies.length > 0) {
-        let closestDist = Infinity;
-        let closestEnemy = null;
-
-        enemies.forEach(en => {
-            const d = Math.hypot(en.x - player.x, en.y - player.y);
-            if (d < closestDist) {
-                closestDist = d;
-                closestEnemy = en;
-            }
-        });
-
-        if (closestEnemy) {
-            targetAngle = Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x);
-            lastAngle = targetAngle; // Lagre retningen til neste gang
-        }
+        let closest = enemies.reduce((prev, curr) => 
+            Math.hypot(curr.x - player.x, curr.y - player.y) < Math.hypot(prev.x - player.x, prev.y - player.y) ? curr : prev
+        );
+        targetAngle = Math.atan2(closest.y - player.y, closest.x - player.x);
     }
 
-    // Skyt gul kule
+    // PISTOL
+    if (selectedWeaponIndex === 0) {
+        if (now - lastShotTime < 400) return;
+        createBullet(player.x, player.y, targetAngle, 8, 10, Infinity);
+        lastShotTime = now;
+    } 
+    // SMG
+    else if (selectedWeaponIndex === 1) {
+        if (now - lastShotTime < 200) return; // 0.2 sek cooldown
+        for (let i = 0; i < 6; i++) {
+            setTimeout(() => {
+                const spread = (Math.random() - 0.5) * (Math.PI / 36); // 5 grader spredning
+                createBullet(player.x, player.y, targetAngle + spread, 40, 5, Infinity);
+            }, i * 30);
+        }
+        lastShotTime = now;
+    }
+    // SHOTGUN
+    else if (selectedWeaponIndex === 2) {
+        if (now - lastShotTime < 800) return;
+        const bulletCount = 12;
+        const spreadArc = Math.PI / 3; // 60 grader vifte
+        for (let i = 0; i < bulletCount; i++) {
+            const angle = (targetAngle - spreadArc/2) + (Math.random() * spreadArc);
+            // Hastighet: 20x SMG (40*20 = 800), Levetid: 3.5 fiender avstand (ca 70-80px)
+            createBullet(player.x, player.y, angle, 40, 50, 80); 
+        }
+        lastShotTime = now;
+    }
+}
+
+function createBullet(x, y, angle, speed, dmg, range) {
     bullets.push({ 
-        x: player.x, 
-        y: player.y, 
-        angle: targetAngle, 
-        speed: 8 
+        x, y, angle, speed, dmg, 
+        startX: x, startY: y, range 
     });
 }
 
-function buyWeapon(type) {
-    if (type === 'SMG' && score >= 300) {
-        score -= 300;
-        ownedWeapons.smg = true;
-        document.getElementById("slot-smg").classList.add("active");
-    } else if (type === 'Shotgun' && score >= 450) {
-        score -= 450;
-        ownedWeapons.shotgun = true;
-        document.getElementById("slot-shotgun").classList.add("active");
+function buyWeapon(idx) {
+    const prices = [0, 300, 450];
+    if (score >= prices[idx] && !ownedWeapons[idx]) {
+        score -= prices[idx];
+        ownedWeapons[idx] = true;
+        document.getElementById(`slot-${idx}`).classList.add("owned");
+        updateUI();
     }
-    updateUI();
 }
 
 function closeShop() {
     shopOpen = false;
     document.getElementById("shop").style.display = "none";
     wave++;
-    updateUI();
 }
 
 function updateUI() {
@@ -143,80 +181,90 @@ function updateUI() {
     document.getElementById("score").innerText = score;
     document.getElementById("shopScore").innerText = score;
     document.getElementById("wave").innerText = wave;
+    document.getElementById("current-weapon-text").innerText = weaponNames[selectedWeaponIndex];
+    
+    // Oppdater inventar-klasser
+    for (let i = 0; i < 3; i++) {
+        const el = document.getElementById(`slot-${i}`);
+        el.classList.remove("selected");
+        if (i === selectedWeaponIndex) el.classList.add("selected");
+    }
 }
 
 function update() {
     if (shopOpen || health <= 0) return;
 
-    // Bevegelse (Tastatur)
     if (keys['w'] && player.y > 0) player.y -= player.speed;
     if (keys['s'] && player.y < canvas.height) player.y += player.speed;
     if (keys['a'] && player.x > 0) player.x -= player.speed;
     if (keys['d'] && player.x < canvas.width) player.x += player.speed;
 
-    // Oppdater kuler (Gule)
     bullets.forEach((b, i) => {
         b.x += Math.cos(b.angle) * b.speed;
         b.y += Math.sin(b.angle) * b.speed;
-        if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) bullets.splice(i, 1);
+        
+        const distTravelled = Math.hypot(b.x - b.startX, b.y - b.startY);
+        if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height || distTravelled > b.range) {
+            bullets.splice(i, 1);
+        }
     });
 
-    // Oppdater fiender
     enemies.forEach((en, i) => {
         const angle = Math.atan2(player.y - en.y, player.x - en.x);
         en.x += Math.cos(angle) * (1 + wave * 0.1);
         en.y += Math.sin(angle) * (1 + wave * 0.1);
 
         if (Math.hypot(player.x - en.x, player.y - en.y) < 20) {
-            health -= 5;
+            health -= 1;
             enemies.splice(i, 1);
             updateUI();
         }
 
         bullets.forEach((b, bi) => {
             if (Math.hypot(en.x - b.x, en.y - b.y) < 15) {
-                enemies.splice(i, 1);
+                en.hp -= b.dmg;
                 bullets.splice(bi, 1);
-                score += 50;
-                updateUI();
-                if (score % 600 === 0) { 
-                    shopOpen = true; 
-                    document.getElementById("shop").style.display = "flex"; 
+                if (en.hp <= 0) {
+                    enemies.splice(i, 1);
+                    score += 50;
+                    updateUI();
+                    if (score > 0 && score % 600 === 0) {
+                        shopOpen = true;
+                        document.getElementById("shop").style.display = "flex";
+                    }
                 }
             }
         });
     });
 
-    // Spawn fiender fra sidene
-    if (Math.random() < 0.02) {
-        const edge = Math.floor(Math.random() * 4);
-        let ex, ey;
-        if(edge === 0) { ex = Math.random()*800; ey = -20; }
-        else if(edge === 1) { ex = 820; ey = Math.random()*500; }
-        else if(edge === 2) { ex = Math.random()*800; ey = 520; }
-        else { ex = -20; ey = Math.random()*500; }
-        enemies.push({ x: ex, y: ey });
+    if (Math.random() < 0.02 + (wave * 0.005)) {
+        enemies.push({ x: Math.random()*800, y: -20, hp: 15 });
     }
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Spiller
+    // Tegn spiller
     ctx.fillStyle = "cyan";
     ctx.fillRect(player.x - 10, player.y - 10, 20, 20);
 
-    // Kuler (Gule og rette)
+    // Tegn kuler
     ctx.fillStyle = "yellow";
     bullets.forEach(b => {
         ctx.beginPath();
-        ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+        ctx.arc(b.x, b.y, 3, 0, Math.PI*2);
         ctx.fill();
     });
 
-    // Fiender
-    ctx.fillStyle = "red";
-    enemies.forEach(en => ctx.fillRect(en.x - 10, en.y - 10, 20, 20));
+    // Tegn fiender
+    enemies.forEach(en => {
+        ctx.fillStyle = "red";
+        ctx.fillRect(en.x - 10, en.y - 10, 20, 20);
+        // HP bar liten
+        ctx.fillStyle = "green";
+        ctx.fillRect(en.x - 10, en.y - 15, (en.hp/15)*20, 3);
+    });
 
     update();
     requestAnimationFrame(draw);
