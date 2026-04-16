@@ -2,13 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Sandbox Assault Shooter</title>
+<title>Sandbox Assault Shooter - Keyboard Only</title>
 <style>
     body { margin: 0; background: #111; color: white; font-family: Arial, sans-serif; text-align: center; overflow: hidden; }
     #ui { padding: 10px; background: #222; display: flex; justify-content: space-around; }
     canvas { background: #000; display: block; margin: auto; border: 2px solid #444; }
     
-    /* Inventar-system nederst til venstre */
     #inventory {
         position: absolute;
         bottom: 20px;
@@ -29,7 +28,7 @@
         color: #777;
     }
     .slot.active {
-        border-color: #00ff00;
+        border-color: #ff00ff; /* Rosa/Lilla kant for aktive våpen */
         color: white;
         background: #444;
     }
@@ -77,28 +76,46 @@ const bullets = [];
 const enemies = [];
 const keys = {};
 
-// Sikte-koordinater (brukes for å vite hvilken vei vi skyter med E)
-let mouseX = 0;
-let mouseY = 0;
+// Siste kjente skytevinkel (hvis ingen fiender finnes, skyt oppover som default)
+let lastAngle = -Math.PI / 2;
 
 window.addEventListener("keydown", e => {
     keys[e.key.toLowerCase()] = true;
-    // Sjekk om spilleren trykker "E" for å skyte
-    if (e.key.toLowerCase() === 'e') {
-        shoot();
-    }
+    if (e.key.toLowerCase() === 'e') shoot();
 });
 window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
-canvas.addEventListener("mousemove", e => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = e.clientX - rect.left;
-    mouseY = e.clientY - rect.top;
-});
 
 function shoot() {
     if (shopOpen || health <= 0) return;
-    const angle = Math.atan2(mouseY - player.y, mouseX - player.x);
-    bullets.push({ x: player.x, y: player.y, angle: angle, speed: 8 });
+
+    let targetAngle = lastAngle;
+
+    // Finn nærmeste fiende
+    if (enemies.length > 0) {
+        let closestDist = Infinity;
+        let closestEnemy = null;
+
+        enemies.forEach(en => {
+            const d = Math.hypot(en.x - player.x, en.y - player.y);
+            if (d < closestDist) {
+                closestDist = d;
+                closestEnemy = en;
+            }
+        });
+
+        if (closestEnemy) {
+            targetAngle = Math.atan2(closestEnemy.y - player.y, closestEnemy.x - player.x);
+            lastAngle = targetAngle; // Lagre retningen til neste gang
+        }
+    }
+
+    // Skyt gul kule
+    bullets.push({ 
+        x: player.x, 
+        y: player.y, 
+        angle: targetAngle, 
+        speed: 8 
+    });
 }
 
 function buyWeapon(type) {
@@ -131,17 +148,20 @@ function updateUI() {
 function update() {
     if (shopOpen || health <= 0) return;
 
+    // Bevegelse (Tastatur)
     if (keys['w'] && player.y > 0) player.y -= player.speed;
     if (keys['s'] && player.y < canvas.height) player.y += player.speed;
     if (keys['a'] && player.x > 0) player.x -= player.speed;
     if (keys['d'] && player.x < canvas.width) player.x += player.speed;
 
+    // Oppdater kuler (Gule)
     bullets.forEach((b, i) => {
         b.x += Math.cos(b.angle) * b.speed;
         b.y += Math.sin(b.angle) * b.speed;
         if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) bullets.splice(i, 1);
     });
 
+    // Oppdater fiender
     enemies.forEach((en, i) => {
         const angle = Math.atan2(player.y - en.y, player.x - en.x);
         en.x += Math.cos(angle) * (1 + wave * 0.1);
@@ -167,8 +187,15 @@ function update() {
         });
     });
 
+    // Spawn fiender fra sidene
     if (Math.random() < 0.02) {
-        enemies.push({ x: Math.random() * 800, y: -20 });
+        const edge = Math.floor(Math.random() * 4);
+        let ex, ey;
+        if(edge === 0) { ex = Math.random()*800; ey = -20; }
+        else if(edge === 1) { ex = 820; ey = Math.random()*500; }
+        else if(edge === 2) { ex = Math.random()*800; ey = 520; }
+        else { ex = -20; ey = Math.random()*500; }
+        enemies.push({ x: ex, y: ey });
     }
 }
 
@@ -179,16 +206,20 @@ function draw() {
     ctx.fillStyle = "cyan";
     ctx.fillRect(player.x - 10, player.y - 10, 20, 20);
 
-    // Kuler
-    ctx.fillStyle = "white";
-    bullets.forEach(b => ctx.beginPath() || ctx.arc(b.x, b.y, 3, 0, Math.PI*2) || ctx.fill());
+    // Kuler (Gule og rette)
+    ctx.fillStyle = "yellow";
+    bullets.forEach(b => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+        ctx.fill();
+    });
 
     // Fiender
     ctx.fillStyle = "red";
     enemies.forEach(en => ctx.fillRect(en.x - 10, en.y - 10, 20, 20));
 
-    requestAnimationFrame(draw);
     update();
+    requestAnimationFrame(draw);
 }
 
 draw();
